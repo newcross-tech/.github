@@ -1,0 +1,13 @@
+{
+  "name": "Newcross Develop Workflow",
+  "description": "Newcross Develop starter workflow.",
+  "iconName": "example-icon",
+  "categories": [
+      "continuous-integration"
+  ],
+  "filePatterns": [
+      "package.json$",
+      "^Dockerfile",
+      ".*\\.md$"
+  ]
+}
