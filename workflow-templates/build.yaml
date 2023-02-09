@@ -6,6 +6,7 @@ on:
       stage:
         required: true
         type: string
+
     secrets:
       AWS_ACCESS_KEY_ID:
         required: true
@@ -13,49 +14,121 @@ on:
         required: true
       AWS_REGION:
         required: true
-        
+      SONAR_TOKEN:
+        required: false
+      GH_TOKEN:
+        required: false
+
 jobs:
-  version:
+  PRECOMMIT:
+    # https://github.com/pre-commit/pre-commit-hooks
+    # requires a .pre-commit-config.yaml config file in root of app repo
+    name: Pre-commit checks
+    runs-on: self-hosted|ubuntu-latest (set one or the other)
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-python@v3
+    - uses: pre-commit/action@v3.0.0
+
+
+  # remove if not required and update below VERSION.needs, etc.
+  # requires a sonar-project.properties in root of app repo
+  SONARCLOUD:
+    name: SonarCloud Scan
+    needs: PRECOMMIT
+    uses: newcross-tech/workflows/.github/workflows/sonarcloud.yaml@master
+    with:
+      runs-on: self-hosted|ubuntu-latest (set one or the other)
+    secrets:
+      SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+
+  VERSION:
     name: Versions
+    needs: [SONARCLOUD]
+    # https://github.com/newcross-tech/calculate-versions-action
     uses: newcross-tech/workflows/.github/workflows/getVersion.yaml@master
     with:
-      toolset: node|gradle
-      prefix:
-      pr_number:
-      input_file:
-      base_version: 
+      runs-on: self-hosted|ubuntu-latest (set one or the other)
+      toolset: node|gradle (set one or the other)
+      prefix: use or remove as necessary
+      pr_number: use or remove as necessary
+      input_file: use or remove as necessary
+      base_version: use or remove as necessary
 
 
+  GET-COMMIT-MESSAGE:
+    name: Get commit message
+    needs: [SONARCLOUD]
+    uses: newcross-tech/workflows/.github/workflows/getCommitMessage.yaml@master
+    runs-on: self-hosted|ubuntu-latest (set one or the other)
 
-  build:
+
+  BUILD:
     name: Build 
-    runs-on: ubuntu-latest
-
+    runs-on: self-hosted|ubuntu-latest (set one or the other)
+    needs: [VERSION, GET-COMMIT-MESSAGE]
+    env: use as required, remove if not needed
+      
     steps:
       - name: Checkout
         uses: actions/checkout@v3
 
-      - name: Complete other build tasks here....
+      - name: Configure AWS credentials
+        id: aws-credentials
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+          mask-aws-account-id: false
+
+      - id: Complete further steps here
+        name: 
+        if: use as necessary
+        env: use as necessary
+        run: 
 
 
-
-
-  docker:
+  DOCKER:
     name: Docker image
-    needs:
-      - build
-      - version
+    needs: [BUILD, VERSION]
+    # https://github.com/newcross-tech/build-push-image-to-ecr
     uses: newcross-tech/workflows/.github/workflows/docker.yaml@master
     with:
-      ecr-repository: ""
-      push-images: ${{ github.ref_name == 'master' || github.ref_name == 'develop' }}
-      file: ./Dockerfile
-      context: .
-      image-tag: ${GITHUB_REF##*/}-${{ needs.version.outputs.IMAGE_TAG }}
-      tag-latest: ${{ github.ref_name == 'main' }} 
+      ecr-repository: enter ECR repo name here
+      push-images: ${{ github.ref_name == 'master' || github.ref_name == 'develop' || contains(needs.GET-COMMIT-MESSAGE.outputs.message, '[push-image]') }} (optional)
+      image-tag: ${{ needs.VERSION.outputs.IMAGE_TAG }} (optional)
+      tag-latest: ${{ github.ref_name == 'master' }} (optional)
+      platforms: linux/amd64,linux/arm64 (optional)
+      runs-on: self-hosted|ubuntu-latest (set one or the other)
+      build-args: (optional)
+      file: ./Dockerfile (optional)
+      context: . (optional)
     secrets:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: ${{ secrets.AWS_REGION }}
 
+
+  TAG:
+    name: Tag code
+    uses: newcross-tech/workflows/.github/workflows/tag.yaml@master
+    needs: [VERSION, GET-COMMIT-MESSAGE, DOCKER]
+    if: github.ref_name == 'master'
+    with:
+      SEMVER: ${{ needs.VERSION.outputs.SEMVER }}
+      message: ${{ needs.GET-COMMIT-MESSAGE.outputs.message }}
+      runs-on: self-hosted|ubuntu-latest (set one or the other)
+
+
+  # remove if not required  
+  OWASP:
+    name: OWASP_ZAP_SCAN
+    needs: [TAG]
+    uses: newcross-tech/workflows/.github/workflows/owasp.yaml@master
+    with:
+      runs-on: self-hosted|ubuntu-latest (set one or the other)
+      target_url: the url of your application to scan
 
