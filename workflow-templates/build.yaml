@@ -62,7 +62,8 @@ jobs:
     name: Get commit message
     needs: [SONARCLOUD]
     uses: newcross-tech/workflows/.github/workflows/getCommitMessage.yaml@master
-    runs-on: self-hosted|ubuntu-latest (set one or the other)
+    with:
+      runs-on: self-hosted|ubuntu-latest (set one or the other)
 
 
   BUILD:
